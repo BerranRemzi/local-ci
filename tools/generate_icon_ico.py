@@ -6,7 +6,6 @@ from PIL import Image, ImageColor, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_ICO = ROOT / "static" / "local-ci.ico"
-OUT_PNG = ROOT / "static" / "local-ci-icon-rendered.png"
 
 
 def lerp(a: int, b: int, t: float) -> int:
@@ -148,8 +147,7 @@ def main() -> None:
             fill=ImageColor.getcolor(color, "RGBA"),
         )
 
-    OUT_PNG.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(OUT_PNG)
+    OUT_ICO.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(
         OUT_ICO,
         sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
