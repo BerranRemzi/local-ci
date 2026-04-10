@@ -1,34 +1,35 @@
 {
   "name": "example",
-  "description": "Example pipeline - simulated CI workflow with looped logs and delays",
+  "description": "Example pipeline - simulated workflow with filesystem changes to demonstrate artifacts",
   "workspace": "./workspace/example",
   "env": {
-    "EXAMPLE_VAR": "example_value"
+    "EXAMPLE_VAR": "example_value",
+    "ARTIFACT_ROOT": "./workspace/example"
   },
   "steps": [
     {
       "name": "clone",
-      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 5; $i++) { Write-Output ('[checkout] preparing sources chunk ' + $i); Start-Sleep -Seconds 1 }\"",
+      "command": "powershell -NoProfile -Command \"New-Item -ItemType Directory -Path src,docs -Force | Out-Null; for ($i=1; $i -le 5; $i++) { Set-Content -Path ('src/module-' + $i + '.txt') -Value ('source line ' + $i); Write-Output ('[clone] created src/module-' + $i + '.txt'); Start-Sleep -Milliseconds 600 }; Set-Content -Path docs/README.md -Value 'initial docs'\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "pull",
-      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 4; $i++) { Write-Output ('[pull] syncing branch update ' + $i); Start-Sleep -Seconds 1 }\"",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 4; $i++) { Add-Content -Path docs/README.md -Value ('update line ' + $i); Set-Content -Path ('src/feature-' + $i + '.txt') -Value ('feature payload ' + $i); Write-Output ('[pull] synced update ' + $i); Start-Sleep -Milliseconds 600 }\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "build",
-      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 6; $i++) { Write-Output ('[build] compiling module ' + $i); Start-Sleep -Seconds 1 }\"",
+      "command": "powershell -NoProfile -Command \"New-Item -ItemType Directory -Path build,temp -Force | Out-Null; for ($i=1; $i -le 6; $i++) { Set-Content -Path ('build/object-' + $i + '.bin') -Value ('compiled bytes ' + $i); Set-Content -Path ('temp/chunk-' + $i + '.tmp') -Value ('temp data ' + $i); Write-Output ('[build] produced object-' + $i); Start-Sleep -Milliseconds 600 }\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "run",
-      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 5; $i++) { Write-Output ('[run] executing runtime task ' + $i); Start-Sleep -Seconds 1 }\"",
+      "command": "powershell -NoProfile -Command \"New-Item -ItemType Directory -Path runtime -Force | Out-Null; for ($i=1; $i -le 5; $i++) { Set-Content -Path ('runtime/result-' + $i + '.json') -Value ('{`\"run`\":' + $i + ',`\"status`\":`\"ok`\"}'); Write-Output ('[run] wrote runtime/result-' + $i + '.json'); Start-Sleep -Milliseconds 600 }\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "publish",
-      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 3; $i++) { Write-Output ('[publish] shipping artifact batch ' + $i); Start-Sleep -Seconds 1 }\"",
+      "command": "powershell -NoProfile -Command \"New-Item -ItemType Directory -Path dist -Force | Out-Null; for ($i=1; $i -le 3; $i++) { Set-Content -Path ('dist/package-' + $i + '.zip') -Value ('artifact package ' + $i); Write-Output ('[publish] exported package-' + $i + '.zip'); Start-Sleep -Milliseconds 600 }; if (Test-Path temp) { Remove-Item -Path temp -Recurse -Force; Write-Output '[publish] removed temp folder' }\"",
       "workdir": "./workspace/example"
     }
   ]
