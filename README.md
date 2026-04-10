@@ -9,6 +9,7 @@ A lightweight, self-hosted CI pipeline runner built with Python Flask. Run pipel
 - **Per-step log files** — each step's output is stored in `logs/<run-id>/<step>.log`
 - **REST API** — trigger and query runs programmatically
 - **Webhook support** — GitHub and GitLab push event webhooks
+- **Independent job reruns** — rerun a single job/step as a new run from the run detail page or API
 - **Windows executable** — build a single `.exe` with PyInstaller
 
 ## Quick Start
@@ -85,6 +86,7 @@ Each file defines one pipeline.
 | POST | `/api/pipeline/<name>/run` | Trigger a run (optionally pass inline pipeline JSON body) |
 | GET | `/api/runs` | List all runs |
 | GET | `/api/run/<run_id>` | Get run status |
+| POST | `/api/run/<run_id>/step/<step>/rerun` | Rerun one step/job as a new run |
 | GET | `/run/<run_id>/log/<step>` | Get raw step log text |
 
 ### Trigger run via API

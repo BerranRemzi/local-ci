@@ -22,6 +22,19 @@ def _pipeline_snapshot_path(run_log_dir: str) -> str:
     return os.path.join(run_log_dir, "pipeline.json")
 
 
+def _clone_step(step: Step) -> Step:
+    return Step(
+        name=step.name,
+        command=step.command,
+        workdir=step.workdir,
+        env=dict(step.env),
+        continue_on_error=step.continue_on_error,
+        allow_to_fail=step.allow_to_fail,
+        success=step.success,
+        fail=step.fail,
+    )
+
+
 def _pipeline_to_dict(pipeline: Pipeline) -> dict:
     return {
         "name": pipeline.name,
@@ -46,17 +59,43 @@ def _pipeline_to_dict(pipeline: Pipeline) -> dict:
 
 def _write_pipeline_snapshot(pipeline: Pipeline, run_log_dir: str):
     snapshot_path = _pipeline_snapshot_path(run_log_dir)
-
-    source_file = pipeline.source_file
-    if source_file and os.path.exists(source_file):
-        try:
-            shutil.copy2(source_file, snapshot_path)
-            return
-        except OSError:
-            pass
-
     with open(snapshot_path, "w", encoding="utf-8") as f:
         json.dump(_pipeline_to_dict(pipeline), f, indent=2)
+
+
+def _load_pipeline_snapshot(run_log_dir: str) -> Optional[Pipeline]:
+    snapshot_path = _pipeline_snapshot_path(run_log_dir)
+    if not os.path.exists(snapshot_path):
+        return None
+
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except OSError:
+        return None
+
+    # New snapshots are JSON pipeline dictionaries.
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and "steps" in data and "name" in data:
+            return Pipeline.from_dict(data, source_file=snapshot_path)
+    except json.JSONDecodeError:
+        pass
+
+    # Backward compatibility: older snapshots may contain copied YAML content.
+    try:
+        import yaml
+    except ImportError:
+        return None
+
+    try:
+        data = yaml.safe_load(raw) or {}
+        if isinstance(data, dict):
+            return Pipeline.from_yaml_dict(data, source_file=snapshot_path, path=snapshot_path)
+    except Exception:
+        return None
+
+    return None
 
 
 def _write_run_meta(run: dict):
@@ -198,7 +237,7 @@ def list_runs_for_pipeline(pipeline_name: str, logs_dir: Optional[str] = None) -
     return sorted(runs, key=lambda r: r["started_at"], reverse=True)
 
 
-def trigger_run(pipeline: Pipeline, logs_dir: str) -> str:
+def trigger_run(pipeline: Pipeline, logs_dir: str, metadata: Optional[dict] = None) -> str:
     run_id = str(uuid.uuid4())[:8]
     run_log_dir = os.path.join(logs_dir, run_id)
     os.makedirs(run_log_dir, exist_ok=True)
@@ -212,6 +251,8 @@ def trigger_run(pipeline: Pipeline, logs_dir: str) -> str:
         "steps": {s.name: {"status": "pending", "exit_code": None} for s in pipeline.steps},
         "log_dir": run_log_dir,
     }
+    if metadata:
+        record.update(metadata)
     with _runs_lock:
         _runs[run_id] = record
     _write_run_meta(record)
@@ -402,3 +443,35 @@ def delete_run(run_id: str, logs_dir: str) -> bool:
     with _runs_lock:
         _runs.pop(run_id, None)
     return True
+
+
+def rerun_step(run_id: str, step_name: str, logs_dir: str) -> Optional[str]:
+    run = get_run(run_id, logs_dir)
+    if not run:
+        return None
+
+    pipeline = _load_pipeline_snapshot(run.get("log_dir", ""))
+    if not pipeline:
+        return None
+
+    original_step = next((s for s in pipeline.steps if s.name == step_name), None)
+    if not original_step:
+        return None
+
+    rerun_pipeline = Pipeline(
+        name=pipeline.name,
+        description=pipeline.description,
+        workspace=pipeline.workspace,
+        env=dict(pipeline.env),
+        steps=[_clone_step(original_step)],
+        source_file=pipeline.source_file,
+    )
+
+    return trigger_run(
+        rerun_pipeline,
+        logs_dir,
+        metadata={
+            "rerun_of_run": run_id,
+            "rerun_of_step": step_name,
+        },
+    )

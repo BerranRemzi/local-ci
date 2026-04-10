@@ -89,6 +89,16 @@ class Pipeline:
             )
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+        return Pipeline.from_yaml_dict(data, source_file=path, path=path)
+
+    @staticmethod
+    def from_yaml_dict(
+        data: dict,
+        source_file: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> "Pipeline":
+        if not isinstance(data, dict):
+            raise ValueError("YAML pipeline data must be a mapping/object")
         if _looks_like_github_actions(data):
             return Pipeline._from_github_actions_dict(data, source_file=path, path=path)
         return Pipeline._from_gitlab_ci_dict(data, source_file=path, path=path)

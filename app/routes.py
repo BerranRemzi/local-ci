@@ -13,6 +13,7 @@ from .runner import (
     get_step_log,
     list_runs,
     list_runs_for_pipeline,
+    rerun_step,
     trigger_run,
 )
 
@@ -95,6 +96,13 @@ def create_app() -> Flask:
             return redirect(url_for("pipeline_detail", name=pipeline_name))
         return redirect(url_for("index"))
 
+    @app.route("/run/<run_id>/step/<path:step_name>/rerun", methods=["POST"])
+    def rerun_run_step_ui(run_id, step_name):
+        new_run_id = rerun_step(run_id, step_name, LOGS_DIR)
+        if not new_run_id:
+            abort(404)
+        return redirect(url_for("run_detail", run_id=new_run_id))
+
     # ── Step log ───────────────────────────────────────────────────────────────
 
     @app.route("/run/<run_id>/log/<step_name>")
@@ -123,6 +131,13 @@ def create_app() -> Flask:
         if not deleted:
             abort(404)
         return jsonify({"status": "deleted", "run_id": run_id}), 200
+
+    @app.route("/api/run/<run_id>/step/<path:step_name>/rerun", methods=["POST"])
+    def api_rerun_step(run_id, step_name):
+        new_run_id = rerun_step(run_id, step_name, LOGS_DIR)
+        if not new_run_id:
+            abort(404)
+        return jsonify({"run_id": new_run_id, "status": "started"}), 202
 
     @app.route("/api/pipelines")
     def api_pipelines():

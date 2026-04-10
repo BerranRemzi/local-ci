@@ -31,6 +31,8 @@
     pre { padding: 14px 16px; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: #c9d1d9; min-height: 40px; }
     .btn-danger { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: .82rem; cursor: pointer; border: 1px solid #6b2222; background: #4a1a1a; color: #ffd3d3; }
     .btn-danger:hover { background: #6b2222; }
+    .btn-rerun { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: .78rem; cursor: pointer; border: 1px solid #2f81f7; background: #1f6feb; color: #fff; }
+    .btn-rerun:hover { background: #388bfd; }
     .run-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; font-size: .85rem; color: #8b949e; }
     .run-meta span strong { color: #e6edf3; }
   </style>
@@ -54,6 +56,9 @@
     <span>Status: <strong><span id="run-status" class="badge badge-{{ run.status }}">{{ run.status }}</span></strong></span>
     <span>Started: <strong id="run-started">{{ run.started_at[:19].replace('T',' ') }}</strong></span>
     <span id="run-finished-wrap" {% if not run.finished_at %}style="display:none"{% endif %}>Finished: <strong id="run-finished">{{ run.finished_at[:19].replace('T',' ') if run.finished_at else '' }}</strong></span>
+    {% if run.rerun_of_run and run.rerun_of_step %}
+    <span>Rerun Of: <strong><a href="/run/{{ run.rerun_of_run }}">{{ run.rerun_of_run }}</a> / <code>{{ run.rerun_of_step }}</code></strong></span>
+    {% endif %}
   </div>
 
   <h2>Steps</h2>
@@ -64,6 +69,9 @@
       <span id="badge-{{ step_name }}" class="badge badge-{{ step_info.status }}">{{ step_info.status }}</span>
       <span class="step-name">{{ step_name }}</span>
       <span id="exit-{{ step_name }}" style="font-size:.78rem;color:#8b949e;{% if step_info.exit_code is none %}display:none{% endif %}">exit {{ step_info.exit_code if step_info.exit_code is not none else '' }}</span>
+      <form method="POST" action="/run/{{ run.id }}/step/{{ step_name | urlencode }}/rerun" style="margin:0" onsubmit="event.stopPropagation(); return confirm('Rerun step {{ step_name }} as a new run?');">
+        <button class="btn-rerun" type="submit" onclick="event.stopPropagation();">Rerun</button>
+      </form>
       <span style="color:#8b949e;font-size:.8rem">▼</span>
     </div>
     <div class="log-panel" id="log-{{ step_name }}">
