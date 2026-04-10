@@ -21,6 +21,8 @@
     .btn:hover { background: #30363d; }
     .btn-primary { background: #238636; border-color: #2ea043; color: #fff; }
     .btn-primary:hover { background: #2ea043; }
+    .btn-danger { background: #4a1a1a; border-color: #6b2222; color: #ffd3d3; }
+    .btn-danger:hover { background: #6b2222; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
     .badge-success { background: #1a4a1a; color: #3fb950; }
     .badge-failed  { background: #4a1a1a; color: #f85149; }
@@ -74,14 +76,25 @@
       {% if runs %}
       <div class="card">
         <table>
-          <thead><tr><th>Run</th><th>Pipeline</th><th>Status</th><th>Started</th></tr></thead>
+          <thead><tr><th>Run</th><th>Pipeline</th><th>Status</th><th>Started</th><th>Action</th></tr></thead>
           <tbody>
           {% for run in runs %}
           <tr>
             <td><a href="/run/{{ run.id }}"><code>{{ run.id }}</code></a></td>
-            <td><a href="/pipeline/{{ run.pipeline }}">{{ run.pipeline }}</a></td>
+            <td>
+              {% if run.pipeline != 'unknown' %}
+              <a href="/pipeline/{{ run.pipeline }}">{{ run.pipeline }}</a>
+              {% else %}
+              <span style="color:#8b949e">unknown</span>
+              {% endif %}
+            </td>
             <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
             <td style="color:#8b949e;font-size:.8rem">{{ run.started_at[:19].replace('T',' ') }}</td>
+            <td>
+              <form method="POST" action="/run/{{ run.id }}/delete" style="margin:0" onsubmit="return confirm('Delete logs for run {{ run.id }}?');">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
           </tr>
           {% endfor %}
           </tbody>

@@ -2,11 +2,13 @@ import hashlib
 import hmac
 import json
 import os
+import sys
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
 
 from .pipeline import Pipeline, load_pipelines
 from .runner import (
+    delete_run,
     get_run,
     get_step_log,
     list_runs,
@@ -14,8 +16,28 @@ from .runner import (
     trigger_run,
 )
 
+
+def _base_runtime_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _resolve_logs_dir() -> str:
+    configured = os.environ.get("LOCAL_CI_LOGS_DIR", "").strip()
+    if configured:
+        if os.path.isabs(configured):
+            target = configured
+        else:
+            target = os.path.abspath(configured)
+    else:
+        target = os.path.join(_base_runtime_dir(), "logs")
+    os.makedirs(target, exist_ok=True)
+    return target
+
+
 PIPELINES_DIR = os.environ.get("LOCAL_CI_PIPELINES_DIR", "./pipelines")
-LOGS_DIR = os.environ.get("LOCAL_CI_LOGS_DIR", "./logs")
+LOGS_DIR = _resolve_logs_dir()
 
 
 def create_app() -> Flask:
@@ -27,7 +49,7 @@ def create_app() -> Flask:
     @app.route("/")
     def index():
         pipelines = load_pipelines(PIPELINES_DIR)
-        recent_runs = list_runs()[:20]
+        recent_runs = list_runs(LOGS_DIR)[:20]
         return render_template("index.html", pipelines=pipelines, runs=recent_runs)
 
     # ── Pipeline detail ────────────────────────────────────────────────────────
@@ -38,7 +60,7 @@ def create_app() -> Flask:
         pipeline = pipelines.get(name)
         if not pipeline:
             abort(404)
-        runs = list_runs_for_pipeline(name)
+        runs = list_runs_for_pipeline(name, LOGS_DIR)
         return render_template("pipeline.html", pipeline=pipeline, runs=runs)
 
     # ── Trigger run ────────────────────────────────────────────────────────────
@@ -56,16 +78,28 @@ def create_app() -> Flask:
 
     @app.route("/run/<run_id>")
     def run_detail(run_id):
-        run = get_run(run_id)
+        run = get_run(run_id, LOGS_DIR)
         if not run:
             abort(404)
         return render_template("run.html", run=run)
+
+    @app.route("/run/<run_id>/delete", methods=["POST"])
+    def delete_run_ui(run_id):
+        run = get_run(run_id, LOGS_DIR)
+        if not run:
+            abort(404)
+        delete_run(run_id, LOGS_DIR)
+
+        pipeline_name = run.get("pipeline")
+        if pipeline_name and pipeline_name != "unknown":
+            return redirect(url_for("pipeline_detail", name=pipeline_name))
+        return redirect(url_for("index"))
 
     # ── Step log ───────────────────────────────────────────────────────────────
 
     @app.route("/run/<run_id>/log/<step_name>")
     def step_log(run_id, step_name):
-        log = get_step_log(run_id, step_name)
+        log = get_step_log(run_id, step_name, LOGS_DIR)
         if log is None:
             abort(404)
         return log, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -74,14 +108,21 @@ def create_app() -> Flask:
 
     @app.route("/api/runs")
     def api_runs():
-        return jsonify(list_runs())
+        return jsonify(list_runs(LOGS_DIR))
 
     @app.route("/api/run/<run_id>")
     def api_run(run_id):
-        run = get_run(run_id)
+        run = get_run(run_id, LOGS_DIR)
         if not run:
             abort(404)
         return jsonify(run)
+
+    @app.route("/api/run/<run_id>", methods=["DELETE"])
+    def api_delete_run(run_id):
+        deleted = delete_run(run_id, LOGS_DIR)
+        if not deleted:
+            abort(404)
+        return jsonify({"status": "deleted", "run_id": run_id}), 200
 
     @app.route("/api/pipelines")
     def api_pipelines():
