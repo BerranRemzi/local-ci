@@ -1,0 +1,51 @@
+name: ci-cd
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  APP_NAME: local-ci
+  BUILD_DIR: build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          echo "Preparing workspace for $APP_NAME"
+          mkdir -p "$BUILD_DIR"
+
+      - name: Build
+        run: |
+          echo "Compiling project"
+          echo "artifact" > "$BUILD_DIR/output.txt"
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Unit tests
+        run: |
+          echo "Running tests"
+          echo "All tests passed"
+
+      - name: Lint (allowed failure)
+        continue-on-error: true
+        run: |
+          echo "Lint warnings found"
+          exit 1
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy preview
+        working-directory: .
+        run: |
+          echo "Deploying preview build"

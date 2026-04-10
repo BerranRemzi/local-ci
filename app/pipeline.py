@@ -20,6 +20,10 @@ _GITLAB_CI_RESERVED_KEYS = {
 }
 
 
+# Characters invalid in Windows filenames.
+_INVALID_STEP_CHARS = re.compile(r'[<>:"/\\|?*]')
+
+
 @dataclass
 class Step:
     name: str
@@ -45,7 +49,7 @@ class Pipeline:
     def from_file(path: str) -> "Pipeline":
         lower = path.lower()
         if lower.endswith(".yml") or lower.endswith(".yaml"):
-            return Pipeline.from_gitlab_yaml_file(path)
+            return Pipeline.from_yaml_file(path)
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return Pipeline.from_dict(data, source_file=path)
@@ -75,17 +79,121 @@ class Pipeline:
         )
 
     @staticmethod
-    def from_gitlab_yaml_file(path: str) -> "Pipeline":
+    def from_yaml_file(path: str) -> "Pipeline":
         try:
             import yaml
         except ImportError:
             raise ImportError(
-                "pyyaml is required to load .gitlab-ci.yml files. "
+                "pyyaml is required to load YAML pipeline files. "
                 "Run: pip install pyyaml"
             )
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+        if _looks_like_github_actions(data):
+            return Pipeline._from_github_actions_dict(data, source_file=path, path=path)
         return Pipeline._from_gitlab_ci_dict(data, source_file=path, path=path)
+
+    @staticmethod
+    def _from_github_actions_dict(
+        data: dict,
+        source_file: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> "Pipeline":
+        """Convert a parsed GitHub Actions workflow dict to a Pipeline."""
+        workflow_name = data.get("name")
+        if isinstance(workflow_name, str) and workflow_name.strip():
+            name = workflow_name.strip()
+        elif path:
+            basename = os.path.basename(path)
+            name = re.sub(r"\.(yml|yaml)$", "", basename, flags=re.IGNORECASE)
+            if not name:
+                name = "github-actions"
+        else:
+            name = "github-actions"
+
+        global_env = _normalise_env(data.get("env"))
+
+        global_run_defaults = {}
+        raw_defaults = data.get("defaults", {})
+        if isinstance(raw_defaults, dict):
+            raw_run = raw_defaults.get("run", {})
+            if isinstance(raw_run, dict):
+                global_run_defaults = raw_run
+
+        jobs = data.get("jobs", {})
+        if not isinstance(jobs, dict):
+            jobs = {}
+
+        ordered_jobs = _order_jobs_by_needs(jobs)
+
+        steps: list[Step] = []
+        for job_name in ordered_jobs:
+            job = jobs.get(job_name)
+            if not isinstance(job, dict):
+                continue
+
+            job_env = _normalise_env(job.get("env"))
+
+            job_run_defaults = global_run_defaults
+            raw_job_defaults = job.get("defaults", {})
+            if isinstance(raw_job_defaults, dict):
+                raw_job_run = raw_job_defaults.get("run", {})
+                if isinstance(raw_job_run, dict):
+                    job_run_defaults = raw_job_run
+
+            default_workdir = job_run_defaults.get("working-directory")
+            if default_workdir is not None:
+                default_workdir = str(default_workdir)
+
+            raw_steps = job.get("steps", [])
+            if not isinstance(raw_steps, list):
+                continue
+
+            for i, raw_step in enumerate(raw_steps, start=1):
+                if not isinstance(raw_step, dict):
+                    continue
+
+                display_name = raw_step.get("name") or raw_step.get("id") or f"step-{i:02d}"
+                safe_name = _safe_step_name(str(display_name), fallback=f"step-{i:02d}")
+                step_name = f"{_safe_step_name(str(job_name), fallback='job')}__{safe_name}"
+
+                if "run" in raw_step:
+                    command = str(raw_step.get("run") or "")
+                    if not command.strip():
+                        command = "echo Empty run step"
+                elif "uses" in raw_step:
+                    uses = str(raw_step.get("uses"))
+                    command = f"echo Skipping action step '{uses}' (uses is not executed locally)"
+                else:
+                    command = "echo Skipping step with no run/uses definition"
+
+                step_env = dict(job_env)
+                step_env.update(_normalise_env(raw_step.get("env")))
+
+                step_workdir = raw_step.get("working-directory")
+                if step_workdir is None:
+                    step_workdir = default_workdir
+                if step_workdir is not None:
+                    step_workdir = str(step_workdir)
+
+                continue_on_error = bool(raw_step.get("continue-on-error", False))
+
+                steps.append(
+                    Step(
+                        name=step_name,
+                        command=command,
+                        workdir=step_workdir,
+                        env=step_env,
+                        allow_to_fail=continue_on_error,
+                    )
+                )
+
+        return Pipeline(
+            name=name,
+            steps=steps,
+            env=global_env,
+            source_file=source_file,
+        )
 
     @staticmethod
     def _from_gitlab_ci_dict(
@@ -228,6 +336,71 @@ def _normalise_script(value) -> list[str]:
     return [str(value)]
 
 
+def _normalise_env(value) -> dict[str, str]:
+    """Return a string-key/string-value env dict from YAML env values."""
+    if not isinstance(value, dict):
+        return {}
+    env = {}
+    for k, v in value.items():
+        env[str(k)] = "" if v is None else str(v)
+    return env
+
+
+def _safe_step_name(value: str, fallback: str = "step") -> str:
+    """Sanitize step names so they are safe as log file names on Windows."""
+    cleaned = _INVALID_STEP_CHARS.sub("-", value).strip()
+    cleaned = re.sub(r"\s+", "-", cleaned)
+    cleaned = cleaned.strip(".-")
+    return cleaned or fallback
+
+
+def _order_jobs_by_needs(jobs: dict) -> list[str]:
+    """Return GitHub Actions jobs ordered by their `needs` dependencies."""
+    ordered: list[str] = []
+    temporary: set[str] = set()
+    permanent: set[str] = set()
+
+    def visit(job_name: str):
+        if job_name in permanent:
+            return
+        if job_name in temporary:
+            # Cycles are invalid in GitHub Actions; keep deterministic order and stop recursion.
+            return
+
+        temporary.add(job_name)
+        raw_job = jobs.get(job_name, {})
+        if isinstance(raw_job, dict):
+            raw_needs = raw_job.get("needs", [])
+            if isinstance(raw_needs, str):
+                needs = [raw_needs]
+            elif isinstance(raw_needs, list):
+                needs = [str(n) for n in raw_needs]
+            else:
+                needs = []
+
+            for dep in needs:
+                if dep in jobs:
+                    visit(dep)
+
+        temporary.remove(job_name)
+        permanent.add(job_name)
+        ordered.append(job_name)
+
+    for name in jobs.keys():
+        visit(name)
+    return ordered
+
+
+def _looks_like_github_actions(data: dict) -> bool:
+    """Heuristic: workflow has `jobs` dict with at least one job-like definition."""
+    if not isinstance(data, dict):
+        return False
+    jobs = data.get("jobs")
+    if not isinstance(jobs, dict) or not jobs:
+        return False
+    return any(isinstance(v, dict) and ("steps" in v or "runs-on" in v) for v in jobs.values())
+
+
 def _join_commands(commands: list[str]) -> str:
     """Join multiple shell commands into a single command string."""
     if not commands:
@@ -242,10 +415,13 @@ def load_pipelines(pipelines_dir: str) -> dict[str, Pipeline]:
     pipelines = {}
     if not os.path.isdir(pipelines_dir):
         return pipelines
-    for fname in os.listdir(pipelines_dir):
-        lower = fname.lower()
-        if lower.endswith(".json") or lower.endswith(".yml") or lower.endswith(".yaml"):
-            path = os.path.join(pipelines_dir, fname)
+    for root, _, files in os.walk(pipelines_dir):
+        for fname in files:
+            lower = fname.lower()
+            if not (lower.endswith(".json") or lower.endswith(".yml") or lower.endswith(".yaml")):
+                continue
+
+            path = os.path.join(root, fname)
             try:
                 p = Pipeline.from_file(path)
                 pipelines[p.name] = p

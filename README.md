@@ -1,10 +1,10 @@
 # Local CI
 
-A lightweight, self-hosted CI pipeline runner built with Python Flask. Run pipelines defined as JSON files, triggered manually via the web UI, REST API, or GitHub/GitLab webhooks.
+A lightweight, self-hosted CI pipeline runner built with Python Flask. Run pipelines defined as JSON files, GitLab CI YAML, or GitHub Actions workflow YAML, triggered manually via the web UI, REST API, or GitHub/GitLab webhooks.
 
 ## Features
 
-- **Universal & configurable** — pipelines are plain JSON files, no hardcoded steps
+- **Universal & configurable** — pipelines can be JSON, GitLab CI YAML, or GitHub Actions YAML
 - **Web dashboard** — view pipelines, trigger runs, browse logs in browser
 - **Per-step log files** — each step's output is stored in `logs/<run-id>/<step>.log`
 - **REST API** — trigger and query runs programmatically
@@ -19,9 +19,14 @@ python main.py
 # Open http://localhost:5000
 ```
 
-## Pipeline Config (JSON)
+## Pipeline Config
 
-Place `.json` files in the `pipelines/` directory. Each file defines one pipeline.
+Place pipeline files in the `pipelines/` directory (subfolders are supported). Supported formats:
+
+- `.json` (native local-ci format)
+- `.yml` / `.yaml` (GitLab CI and GitHub Actions workflow files)
+
+Each file defines one pipeline.
 
 ```json
 {
@@ -67,7 +72,7 @@ Place `.json` files in the `pipelines/` directory. Each file defines one pipelin
 | `LOCAL_CI_HOST` | `0.0.0.0` | Bind host |
 | `LOCAL_CI_PORT` | `5000` | Bind port |
 | `LOCAL_CI_DEBUG` | _(off)_ | Set to `1` to enable Flask debug mode |
-| `LOCAL_CI_PIPELINES_DIR` | `./pipelines` | Path to pipeline JSON configs |
+| `LOCAL_CI_PIPELINES_DIR` | `./pipelines` | Path to pipeline JSON/YAML configs |
 | `LOCAL_CI_LOGS_DIR` | `./logs` | Path to store step logs |
 | `GITHUB_WEBHOOK_SECRET` | _(none)_ | Secret for GitHub webhook HMAC verification |
 | `GITLAB_WEBHOOK_SECRET` | _(none)_ | Token for GitLab webhook verification |
@@ -102,6 +107,18 @@ curl -X POST http://localhost:5000/api/pipeline/any/run \
 ```
 
 ## Webhooks
+
+## GitHub Actions Workflow Support
+
+You can run a GitHub Actions workflow file such as `ci-cd.yml` locally by placing it under `pipelines/`.
+
+How local-ci maps workflow content:
+
+- jobs are ordered by `needs`
+- each job `steps` entry becomes a local-ci step
+- `run` steps execute normally
+- `uses` steps are logged as skipped (composite/action runtime is not executed)
+- `env`, `working-directory`, and `continue-on-error` are mapped to local-ci step settings
 
 ### GitHub
 
@@ -142,7 +159,7 @@ Output:
 Notes:
 - The build script installs dependencies from `requirements.txt` into a local virtual environment.
 - The build script regenerates `static/local-ci.ico` (to match the SVG design) and embeds it into the EXE during PyInstaller build.
-- Pipeline behavior is fully configurable; commands and step names come from pipeline JSON only.
+- Pipeline behavior is fully configurable; commands and step names come from the pipeline config file.
 
 Run the executable — it includes the `templates/`, `static/`, and `pipelines/` directories bundled in.
 
