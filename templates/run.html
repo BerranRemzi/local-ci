@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Run {{ run.id }} — Local CI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; }
+    header a { color: #8b949e; font-size: .9rem; }
+    main { max-width: 900px; margin: 32px auto; padding: 0 24px; }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    .meta { color: #8b949e; font-size: .85rem; margin-bottom: 24px; }
+    h2 { font-size: .85rem; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: .8rem; font-weight: 600; }
+    .badge-success { background: #1a4a1a; color: #3fb950; }
+    .badge-failed  { background: #4a1a1a; color: #f85149; }
+    .badge-running { background: #1a2a4a; color: #58a6ff; }
+    .badge-pending { background: #2a2a1a; color: #d29922; }
+    .badge-skipped { background: #2a2a2a; color: #8b949e; }
+    .step-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+    .step-header { padding: 10px 16px; display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+    .step-header:hover { background: #1c2128; }
+    .step-name { font-family: monospace; font-size: .9rem; font-weight: 600; flex: 1; }
+    .log-panel { display: none; background: #010409; border-top: 1px solid #21262d; padding: 0; }
+    .log-panel.open { display: block; }
+    pre { padding: 14px 16px; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: #c9d1d9; min-height: 40px; }
+    .btn-refresh { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: .82rem; cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; float: right; }
+    .btn-refresh:hover { background: #30363d; }
+    .run-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; font-size: .85rem; color: #8b949e; }
+    .run-meta span strong { color: #e6edf3; }
+  </style>
+</head>
+<body>
+<header>
+  <a href="/pipeline/{{ run.pipeline }}">← {{ run.pipeline }}</a>
+</header>
+<main>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <h1>Run <code style="font-size:1rem">{{ run.id }}</code></h1>
+    <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
+  </div>
+  <div class="run-meta">
+    <span>Status: <strong><span class="badge badge-{{ run.status }}">{{ run.status }}</span></strong></span>
+    <span>Started: <strong>{{ run.started_at[:19].replace('T',' ') }}</strong></span>
+    {% if run.finished_at %}
+    <span>Finished: <strong>{{ run.finished_at[:19].replace('T',' ') }}</strong></span>
+    {% endif %}
+  </div>
+
+  <h2>Steps</h2>
+
+  {% for step_name, step_info in run.steps.items() %}
+  <div class="step-card" id="step-{{ step_name }}">
+    <div class="step-header" onclick="toggleLog('{{ step_name }}')">
+      <span class="badge badge-{{ step_info.status }}">{{ step_info.status }}</span>
+      <span class="step-name">{{ step_name }}</span>
+      {% if step_info.exit_code is not none %}
+      <span style="font-size:.78rem;color:#8b949e">exit {{ step_info.exit_code }}</span>
+      {% endif %}
+      <span style="color:#8b949e;font-size:.8rem">▼</span>
+    </div>
+    <div class="log-panel" id="log-{{ step_name }}">
+      <pre id="pre-{{ step_name }}">Loading…</pre>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if run.status in ('running', 'pending') %}
+  <p style="color:#8b949e;font-size:.82rem;margin-top:12px">Pipeline is still running — refresh to see updates.</p>
+  {% endif %}
+</main>
+
+<script>
+const openPanels = new Set();
+
+function toggleLog(stepName) {
+  const panel = document.getElementById('log-' + stepName);
+  if (openPanels.has(stepName)) {
+    panel.classList.remove('open');
+    openPanels.delete(stepName);
+  } else {
+    panel.classList.add('open');
+    openPanels.add(stepName);
+    loadLog(stepName);
+  }
+}
+
+function loadLog(stepName) {
+  const pre = document.getElementById('pre-' + stepName);
+  fetch('/run/{{ run.id }}/log/' + stepName)
+    .then(r => r.ok ? r.text() : Promise.reject(r.status))
+    .then(text => { pre.textContent = text || '(no output)'; })
+    .catch(err => { pre.textContent = err === 404 ? '(log not available yet)' : '(error loading log)'; });
+}
+
+// Auto-open the first failed or running step
+document.addEventListener('DOMContentLoaded', () => {
+  const steps = {{ run.steps | tojson }};
+  for (const [name, info] of Object.entries(steps)) {
+    if (info.status === 'failed' || info.status === 'running') {
+      toggleLog(name);
+      break;
+    }
+  }
+});
+</script>
+</body>
+</html>

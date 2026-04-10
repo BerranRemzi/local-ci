@@ -1,0 +1,31 @@
+{
+  "name": "example",
+  "description": "Example pipeline - clone, build, and test a project",
+  "workspace": "./workspace/example",
+  "env": {
+    "REPO_URL": "https://github.com/your-org/your-repo.git",
+    "BRANCH": "main"
+  },
+  "steps": [
+    {
+      "name": "clone",
+      "command": "git clone --branch $BRANCH $REPO_URL .",
+      "workdir": "./workspace/example"
+    },
+    {
+      "name": "pull",
+      "command": "git pull origin $BRANCH",
+      "workdir": "./workspace/example"
+    },
+    {
+      "name": "build",
+      "command": "make build",
+      "workdir": "./workspace/example"
+    },
+    {
+      "name": "test",
+      "command": "make test",
+      "workdir": "./workspace/example"
+    }
+  ]
+}

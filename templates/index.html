@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local CI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    main { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+    h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 16px; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid #21262d; display: flex; justify-content: space-between; align-items: center; }
+    .card-body { padding: 14px 18px; }
+    .btn { display: inline-block; padding: 6px 14px; border-radius: 6px; font-size: .85rem; cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; }
+    .btn:hover { background: #30363d; }
+    .btn-primary { background: #238636; border-color: #2ea043; color: #fff; }
+    .btn-primary:hover { background: #2ea043; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+    .badge-success { background: #1a4a1a; color: #3fb950; }
+    .badge-failed  { background: #4a1a1a; color: #f85149; }
+    .badge-running { background: #1a2a4a; color: #58a6ff; }
+    .badge-pending { background: #2a2a1a; color: #d29922; }
+    .badge-skipped { background: #2a2a2a; color: #8b949e; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #21262d; }
+    th { color: #8b949e; font-weight: 500; }
+    .empty { color: #8b949e; font-size: .88rem; padding: 16px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <a href="/">⚙️ <strong>Local CI</strong></a>
+</header>
+<main>
+  <div class="grid">
+    <section>
+      <h2>Pipelines</h2>
+      {% if pipelines %}
+        {% for name, p in pipelines.items() %}
+        <div class="card">
+          <div class="card-header">
+            <a href="/pipeline/{{ p.name }}"><strong>{{ p.name }}</strong></a>
+            <form method="POST" action="/pipeline/{{ p.name }}/run" style="margin:0">
+              <button class="btn btn-primary">▶ Run</button>
+            </form>
+          </div>
+          {% if p.description or p.steps %}
+          <div class="card-body">
+            {% if p.description %}<p style="color:#8b949e;font-size:.85rem;margin-bottom:8px">{{ p.description }}</p>{% endif %}
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              {% for s in p.steps %}
+              <span style="background:#21262d;border:1px solid #30363d;border-radius:4px;padding:2px 8px;font-size:.78rem;font-family:monospace">{{ s.name }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">No pipeline configs found in <code>pipelines/</code>. Add a <code>.json</code> file to get started.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Recent Runs</h2>
+      {% if runs %}
+      <div class="card">
+        <table>
+          <thead><tr><th>Run</th><th>Pipeline</th><th>Status</th><th>Started</th></tr></thead>
+          <tbody>
+          {% for run in runs %}
+          <tr>
+            <td><a href="/run/{{ run.id }}"><code>{{ run.id }}</code></a></td>
+            <td><a href="/pipeline/{{ run.pipeline }}">{{ run.pipeline }}</a></td>
+            <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
+            <td style="color:#8b949e;font-size:.8rem">{{ run.started_at[:19].replace('T',' ') }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="empty">No runs yet. Trigger a pipeline to get started.</p>
+      {% endif %}
+    </section>
+  </div>
+</main>
+</body>
+</html>
