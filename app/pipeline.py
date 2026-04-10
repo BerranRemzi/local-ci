@@ -11,6 +11,9 @@ class Step:
     workdir: Optional[str] = None
     env: dict = field(default_factory=dict)
     continue_on_error: bool = False
+    allow_to_fail: bool = False
+    success: Optional[str] = None
+    fail: Optional[str] = None
 
 
 @dataclass
@@ -37,6 +40,9 @@ class Pipeline:
                 workdir=s.get("workdir"),
                 env=s.get("env", {}),
                 continue_on_error=s.get("continue_on_error", False),
+                allow_to_fail=s.get("allow_to_fail", False),
+                success=s.get("success"),
+                fail=s.get("fail"),
             )
             for s in data.get("steps", [])
         ]

@@ -55,7 +55,10 @@ Place `.json` files in the `pipelines/` directory. Each file defines one pipelin
 | `command` | ✅ | Shell command to run (supports env var substitution) |
 | `workdir` | ❌ | Working directory (defaults to pipeline `workspace`) |
 | `env` | ❌ | Step-level env vars (merged over pipeline-level env) |
-| `continue_on_error` | ❌ | If `true`, subsequent steps still run after failure (default: `false`) |
+| `success` | ❌ | Step name to jump to when this step succeeds |
+| `fail` | ❌ | Step name to jump to when this step fails |
+| `allow_to_fail` | ❌ | If `true`, continue to next step on failure and do not fail pipeline |
+| `continue_on_error` | ❌ | Legacy mode: continue to next step on failure, but final pipeline status remains failed |
 
 ## Environment Variables
 

@@ -18,6 +18,47 @@ def _run_meta_path(run_log_dir: str) -> str:
     return os.path.join(run_log_dir, "run.json")
 
 
+def _pipeline_snapshot_path(run_log_dir: str) -> str:
+    return os.path.join(run_log_dir, "pipeline.json")
+
+
+def _pipeline_to_dict(pipeline: Pipeline) -> dict:
+    return {
+        "name": pipeline.name,
+        "description": pipeline.description,
+        "workspace": pipeline.workspace,
+        "env": pipeline.env,
+        "steps": [
+            {
+                "name": s.name,
+                "command": s.command,
+                "workdir": s.workdir,
+                "env": s.env,
+                "continue_on_error": s.continue_on_error,
+                "allow_to_fail": s.allow_to_fail,
+                "success": s.success,
+                "fail": s.fail,
+            }
+            for s in pipeline.steps
+        ],
+    }
+
+
+def _write_pipeline_snapshot(pipeline: Pipeline, run_log_dir: str):
+    snapshot_path = _pipeline_snapshot_path(run_log_dir)
+
+    source_file = pipeline.source_file
+    if source_file and os.path.exists(source_file):
+        try:
+            shutil.copy2(source_file, snapshot_path)
+            return
+        except OSError:
+            pass
+
+    with open(snapshot_path, "w", encoding="utf-8") as f:
+        json.dump(_pipeline_to_dict(pipeline), f, indent=2)
+
+
 def _write_run_meta(run: dict):
     log_dir = run.get("log_dir")
     if not log_dir:
@@ -174,6 +215,7 @@ def trigger_run(pipeline: Pipeline, logs_dir: str) -> str:
     with _runs_lock:
         _runs[run_id] = record
     _write_run_meta(record)
+    _write_pipeline_snapshot(pipeline, run_log_dir)
 
     thread = threading.Thread(target=_execute_run, args=(run_id, pipeline, run_log_dir), daemon=True)
     thread.start()
@@ -191,8 +233,41 @@ def _resolve_env(pipeline: Pipeline, step: Step) -> dict:
 def _execute_run(run_id: str, pipeline: Pipeline, run_log_dir: str):
     _update_run(run_id, {"status": "running"})
 
+    steps = pipeline.steps
+    step_index = {s.name: i for i, s in enumerate(steps)}
     overall_success = True
-    for step in pipeline.steps:
+    terminated_failed = False
+    current_idx = 0
+    transitions = 0
+    max_transitions = max(100, len(steps) * 20)
+
+    def _mark_pending_steps_as_skipped():
+        run = get_run(run_id)
+        if not run:
+            return
+        pending = [
+            name
+            for name, info in run.get("steps", {}).items()
+            if info.get("status") == "pending"
+        ]
+        for name in pending:
+            _update_step(run_id, name, {"status": "skipped"})
+
+    while current_idx < len(steps):
+        transitions += 1
+        if transitions > max_transitions:
+            overall_success = False
+            terminated_failed = True
+            _update_run(
+                run_id,
+                {
+                    "status": "failed",
+                    "error": f"Transition guard triggered after {transitions - 1} transitions",
+                },
+            )
+            break
+
+        step = steps[current_idx]
         _update_step(run_id, step.name, {"status": "running"})
 
         workdir = step.workdir or pipeline.workspace or "."
@@ -208,19 +283,59 @@ def _execute_run(run_id: str, pipeline: Pipeline, run_log_dir: str):
         step_result = {"status": "success" if success else "failed", "exit_code": exit_code}
         _update_step(run_id, step.name, step_result)
 
-        if not success:
-            overall_success = False
-            if not step.continue_on_error:
-                # Mark remaining steps as skipped
-                remaining = False
-                for s in pipeline.steps:
-                    if remaining:
-                        _update_step(run_id, s.name, {"status": "skipped"})
-                    if s.name == step.name:
-                        remaining = True
-                break
+        if success:
+            if step.success:
+                target = step_index.get(step.success)
+                if target is None:
+                    overall_success = False
+                    terminated_failed = True
+                    _update_run(
+                        run_id,
+                        {
+                            "status": "failed",
+                            "error": f"Step '{step.name}' success target '{step.success}' not found",
+                        },
+                    )
+                    break
+                current_idx = target
+                continue
 
-    final_status = "success" if overall_success else "failed"
+            current_idx += 1
+            continue
+
+        # Failure branch
+        if step.allow_to_fail:
+            current_idx += 1
+            continue
+
+        if step.continue_on_error:
+            overall_success = False
+            current_idx += 1
+            continue
+
+        if step.fail:
+            target = step_index.get(step.fail)
+            if target is None:
+                overall_success = False
+                terminated_failed = True
+                _update_run(
+                    run_id,
+                    {
+                        "status": "failed",
+                        "error": f"Step '{step.name}' fail target '{step.fail}' not found",
+                    },
+                )
+                break
+            current_idx = target
+            continue
+
+        overall_success = False
+        terminated_failed = True
+        break
+
+    _mark_pending_steps_as_skipped()
+
+    final_status = "failed" if terminated_failed or not overall_success else "success"
     _update_run(run_id, {"status": final_status, "finished_at": datetime.now(timezone.utc).isoformat()})
 
 
