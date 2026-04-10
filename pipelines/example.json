@@ -1,30 +1,34 @@
 {
   "name": "example",
-  "description": "Example pipeline - clone, build, and test a project",
+  "description": "Example pipeline - simulated CI workflow with looped logs and delays",
   "workspace": "./workspace/example",
   "env": {
-    "REPO_URL": "https://github.com/your-org/your-repo.git",
-    "BRANCH": "main"
+    "EXAMPLE_VAR": "example_value"
   },
   "steps": [
     {
       "name": "clone",
-      "command": "git clone --branch $BRANCH $REPO_URL .",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 5; $i++) { Write-Output ('[checkout] preparing sources chunk ' + $i); Start-Sleep -Seconds 1 }\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "pull",
-      "command": "git pull origin $BRANCH",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 4; $i++) { Write-Output ('[pull] syncing branch update ' + $i); Start-Sleep -Seconds 1 }\"",
       "workdir": "./workspace/example"
     },
     {
       "name": "build",
-      "command": "make build",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 6; $i++) { Write-Output ('[build] compiling module ' + $i); Start-Sleep -Seconds 1 }\"",
       "workdir": "./workspace/example"
     },
     {
-      "name": "test",
-      "command": "make test",
+      "name": "run",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 5; $i++) { Write-Output ('[run] executing runtime task ' + $i); Start-Sleep -Seconds 1 }\"",
+      "workdir": "./workspace/example"
+    },
+    {
+      "name": "publish",
+      "command": "powershell -NoProfile -Command \"for ($i=1; $i -le 3; $i++) { Write-Output ('[publish] shipping artifact batch ' + $i); Start-Sleep -Seconds 1 }\"",
       "workdir": "./workspace/example"
     }
   ]
