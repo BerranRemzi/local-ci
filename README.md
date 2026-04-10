@@ -138,6 +138,7 @@ Output:
 
 Notes:
 - The build script installs dependencies from `requirements.txt` into a local virtual environment.
+- The Windows executable icon is embedded from `static/local-ci.ico` during PyInstaller build.
 - Pipeline behavior is fully configurable; commands and step names come from pipeline JSON only.
 
 Run the executable — it includes the `templates/`, `static/`, and `pipelines/` directories bundled in.

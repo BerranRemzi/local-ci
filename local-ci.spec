@@ -38,6 +38,7 @@ exe = EXE(
     a.datas,
     [],
     name='local-ci',
+    icon='static/local-ci.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

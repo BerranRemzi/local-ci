@@ -15,6 +15,8 @@ $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 & $VenvPython -m pip install -r requirements.txt
 & $VenvPython -m pip install pyinstaller
 
+& $VenvPython tools/generate_icon_ico.py
+
 & $VenvPython -m PyInstaller local-ci.spec --noconfirm
 
 Write-Host "Build complete: dist/local-ci.exe"
