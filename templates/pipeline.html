@@ -65,7 +65,7 @@
   <div class="card">
     <table>
       <thead><tr><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th></tr></thead>
-      <tbody>
+      <tbody id="pipeline-runs-body">
       {% for run in runs %}
       <tr>
         <td><a href="/run/{{ run.id }}"><code>{{ run.id }}</code></a></td>
@@ -77,9 +77,79 @@
       </tbody>
     </table>
   </div>
+  <p id="pipeline-runs-empty" style="color:#8b949e;font-size:.88rem;display:none">No runs yet.</p>
   {% else %}
-    <p style="color:#8b949e;font-size:.88rem">No runs yet.</p>
+    <p id="pipeline-runs-empty" style="color:#8b949e;font-size:.88rem">No runs yet.</p>
+    <div class="card" id="pipeline-runs-card" style="display:none">
+      <table>
+        <thead><tr><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th></tr></thead>
+        <tbody id="pipeline-runs-body"></tbody>
+      </table>
+    </div>
   {% endif %}
 </main>
+<script>
+const pipelineName = {{ pipeline.name | tojson }};
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatIso(value) {
+  if (!value) return '—';
+  return String(value).slice(0, 19).replace('T', ' ');
+}
+
+function renderPipelineRuns(runs) {
+  const body = document.getElementById('pipeline-runs-body');
+  const empty = document.getElementById('pipeline-runs-empty');
+  const card = document.getElementById('pipeline-runs-card') || (body ? body.closest('.card') : null);
+  if (!body || !empty || !card) return;
+
+  const filtered = runs
+    .filter((run) => run.pipeline === pipelineName)
+    .slice(0, 50);
+
+  if (!filtered.length) {
+    body.innerHTML = '';
+    card.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
+
+  const rows = filtered.map((run) => {
+    const status = run.status || 'unknown';
+    return '<tr>' +
+      '<td><a href="/run/' + encodeURIComponent(run.id) + '"><code>' + escapeHtml(run.id) + '</code></a></td>' +
+      '<td><span class="badge badge-' + escapeHtml(status) + '">' + escapeHtml(status) + '</span></td>' +
+      '<td style="color:#8b949e;font-size:.8rem">' + escapeHtml(formatIso(run.started_at)) + '</td>' +
+      '<td style="color:#8b949e;font-size:.8rem">' + escapeHtml(formatIso(run.finished_at)) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  body.innerHTML = rows;
+  card.style.display = '';
+  empty.style.display = 'none';
+}
+
+function refreshPipelineRuns() {
+  fetch('/api/runs')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(renderPipelineRuns)
+    .catch(() => {
+      // Ignore transient polling errors.
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshPipelineRuns();
+  setInterval(refreshPipelineRuns, 3000);
+});
+</script>
 </body>
 </html>

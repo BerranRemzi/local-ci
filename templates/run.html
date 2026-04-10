@@ -29,8 +29,6 @@
     .log-panel { display: none; background: #010409; border-top: 1px solid #21262d; padding: 0; }
     .log-panel.open { display: block; }
     pre { padding: 14px 16px; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: #c9d1d9; min-height: 40px; }
-    .btn-refresh { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: .82rem; cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; float: right; }
-    .btn-refresh:hover { background: #30363d; }
     .btn-danger { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: .82rem; cursor: pointer; border: 1px solid #6b2222; background: #4a1a1a; color: #ffd3d3; }
     .btn-danger:hover { background: #6b2222; }
     .run-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; font-size: .85rem; color: #8b949e; }
@@ -48,19 +46,14 @@
 <main>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <h1>Run <code style="font-size:1rem">{{ run.id }}</code></h1>
-    <div style="display:flex;gap:8px;align-items:center">
-      <form method="POST" action="/run/{{ run.id }}/delete" onsubmit="return confirm('Delete logs for run {{ run.id }}?');" style="margin:0;">
-        <button class="btn-danger" type="submit">Delete Logs</button>
-      </form>
-      <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
-    </div>
+    <form method="POST" action="/run/{{ run.id }}/delete" onsubmit="return confirm('Delete logs for run {{ run.id }}?');" style="margin:0;">
+      <button class="btn-danger" type="submit">Delete Logs</button>
+    </form>
   </div>
   <div class="run-meta">
-    <span>Status: <strong><span class="badge badge-{{ run.status }}">{{ run.status }}</span></strong></span>
-    <span>Started: <strong>{{ run.started_at[:19].replace('T',' ') }}</strong></span>
-    {% if run.finished_at %}
-    <span>Finished: <strong>{{ run.finished_at[:19].replace('T',' ') }}</strong></span>
-    {% endif %}
+    <span>Status: <strong><span id="run-status" class="badge badge-{{ run.status }}">{{ run.status }}</span></strong></span>
+    <span>Started: <strong id="run-started">{{ run.started_at[:19].replace('T',' ') }}</strong></span>
+    <span id="run-finished-wrap" {% if not run.finished_at %}style="display:none"{% endif %}>Finished: <strong id="run-finished">{{ run.finished_at[:19].replace('T',' ') if run.finished_at else '' }}</strong></span>
   </div>
 
   <h2>Steps</h2>
@@ -68,11 +61,9 @@
   {% for step_name, step_info in run.steps.items() %}
   <div class="step-card" id="step-{{ step_name }}">
     <div class="step-header" onclick="toggleLog('{{ step_name }}')">
-      <span class="badge badge-{{ step_info.status }}">{{ step_info.status }}</span>
+      <span id="badge-{{ step_name }}" class="badge badge-{{ step_info.status }}">{{ step_info.status }}</span>
       <span class="step-name">{{ step_name }}</span>
-      {% if step_info.exit_code is not none %}
-      <span style="font-size:.78rem;color:#8b949e">exit {{ step_info.exit_code }}</span>
-      {% endif %}
+      <span id="exit-{{ step_name }}" style="font-size:.78rem;color:#8b949e;{% if step_info.exit_code is none %}display:none{% endif %}">exit {{ step_info.exit_code if step_info.exit_code is not none else '' }}</span>
       <span style="color:#8b949e;font-size:.8rem">▼</span>
     </div>
     <div class="log-panel" id="log-{{ step_name }}">
@@ -81,12 +72,11 @@
   </div>
   {% endfor %}
 
-  {% if run.status in ('running', 'pending') %}
-  <p style="color:#8b949e;font-size:.82rem;margin-top:12px">Pipeline is still running — refresh to see updates.</p>
-  {% endif %}
+  <p id="running-note" style="color:#8b949e;font-size:.82rem;margin-top:12px;{% if run.status not in ('running', 'pending') %}display:none{% endif %}">Pipeline is still running. Updates load automatically.</p>
 </main>
 
 <script>
+const runId = {{ run.id | tojson }};
 const openPanels = new Set();
 
 function toggleLog(stepName) {
@@ -103,10 +93,80 @@ function toggleLog(stepName) {
 
 function loadLog(stepName) {
   const pre = document.getElementById('pre-' + stepName);
-  fetch('/run/{{ run.id }}/log/' + stepName)
+  fetch('/run/' + runId + '/log/' + stepName)
     .then(r => r.ok ? r.text() : Promise.reject(r.status))
     .then(text => { pre.textContent = text || '(no output)'; })
     .catch(err => { pre.textContent = err === 404 ? '(log not available yet)' : '(error loading log)'; });
+}
+
+function formatIso(value) {
+  if (!value) return '';
+  return String(value).slice(0, 19).replace('T', ' ');
+}
+
+function updateBadge(el, status) {
+  if (!el) return;
+  el.className = 'badge badge-' + status;
+  el.textContent = status;
+}
+
+function applyRunState(run) {
+  updateBadge(document.getElementById('run-status'), run.status);
+
+  const started = document.getElementById('run-started');
+  if (started) started.textContent = formatIso(run.started_at);
+
+  const finishedWrap = document.getElementById('run-finished-wrap');
+  const finished = document.getElementById('run-finished');
+  if (run.finished_at) {
+    finishedWrap.style.display = '';
+    finished.textContent = formatIso(run.finished_at);
+  } else {
+    finishedWrap.style.display = 'none';
+    finished.textContent = '';
+  }
+
+  const note = document.getElementById('running-note');
+  note.style.display = (run.status === 'running' || run.status === 'pending') ? '' : 'none';
+
+  const steps = run.steps || {};
+  for (const [stepName, stepInfo] of Object.entries(steps)) {
+    updateBadge(document.getElementById('badge-' + stepName), stepInfo.status || 'unknown');
+
+    const exitEl = document.getElementById('exit-' + stepName);
+    if (exitEl) {
+      if (stepInfo.exit_code === null || stepInfo.exit_code === undefined) {
+        exitEl.style.display = 'none';
+        exitEl.textContent = '';
+      } else {
+        exitEl.style.display = '';
+        exitEl.textContent = 'exit ' + stepInfo.exit_code;
+      }
+    }
+
+    if (openPanels.has(stepName)) {
+      loadLog(stepName);
+    }
+  }
+
+  return run.status === 'running' || run.status === 'pending';
+}
+
+let pollTimer = null;
+
+function refreshRun() {
+  fetch('/api/run/' + runId)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(run => {
+      const keepPolling = applyRunState(run);
+      if (!keepPolling && pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    })
+    .catch(() => {
+      // Ignore transient polling errors.
+    });
 }
 
 // Auto-open the first failed or running step
@@ -118,6 +178,9 @@ document.addEventListener('DOMContentLoaded', () => {
       break;
     }
   }
+
+  refreshRun();
+  pollTimer = setInterval(refreshRun, 2000);
 });
 </script>
 </body>

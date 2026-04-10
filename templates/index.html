@@ -77,7 +77,7 @@
       <div class="card">
         <table>
           <thead><tr><th>Run</th><th>Pipeline</th><th>Status</th><th>Started</th><th>Action</th></tr></thead>
-          <tbody>
+          <tbody id="recent-runs-body">
           {% for run in runs %}
           <tr>
             <td><a href="/run/{{ run.id }}"><code>{{ run.id }}</code></a></td>
@@ -100,11 +100,79 @@
           </tbody>
         </table>
       </div>
+      <p id="runs-empty" class="empty" style="display:none">No runs yet. Trigger a pipeline to get started.</p>
       {% else %}
-        <p class="empty">No runs yet. Trigger a pipeline to get started.</p>
+        <p id="runs-empty" class="empty">No runs yet. Trigger a pipeline to get started.</p>
+        <div class="card" id="runs-card" style="display:none">
+          <table>
+            <thead><tr><th>Run</th><th>Pipeline</th><th>Status</th><th>Started</th><th>Action</th></tr></thead>
+            <tbody id="recent-runs-body"></tbody>
+          </table>
+        </div>
       {% endif %}
     </section>
   </div>
 </main>
+<script>
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatIso(value) {
+  if (!value) return '';
+  return String(value).slice(0, 19).replace('T', ' ');
+}
+
+function renderRuns(runs) {
+  const body = document.getElementById('recent-runs-body');
+  const empty = document.getElementById('runs-empty');
+  const card = document.getElementById('runs-card') || (body ? body.closest('.card') : null);
+  if (!body || !empty || !card) return;
+
+  if (!runs.length) {
+    body.innerHTML = '';
+    card.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
+
+  const rows = runs.slice(0, 20).map((run) => {
+    const pipelineCell = run.pipeline && run.pipeline !== 'unknown'
+      ? '<a href="/pipeline/' + encodeURIComponent(run.pipeline) + '">' + escapeHtml(run.pipeline) + '</a>'
+      : '<span style="color:#8b949e">unknown</span>';
+
+    return '<tr>' +
+      '<td><a href="/run/' + encodeURIComponent(run.id) + '"><code>' + escapeHtml(run.id) + '</code></a></td>' +
+      '<td>' + pipelineCell + '</td>' +
+      '<td><span class="badge badge-' + escapeHtml(run.status || 'unknown') + '">' + escapeHtml(run.status || 'unknown') + '</span></td>' +
+      '<td style="color:#8b949e;font-size:.8rem">' + escapeHtml(formatIso(run.started_at)) + '</td>' +
+      '<td><form method="POST" action="/run/' + encodeURIComponent(run.id) + '/delete" style="margin:0" onsubmit="return confirm(\'Delete logs for run ' + escapeHtml(run.id) + '?\');"><button class="btn btn-danger" type="submit">Delete</button></form></td>' +
+      '</tr>';
+  }).join('');
+
+  body.innerHTML = rows;
+  card.style.display = '';
+  empty.style.display = 'none';
+}
+
+function refreshRecentRuns() {
+  fetch('/api/runs')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(renderRuns)
+    .catch(() => {
+      // Ignore transient polling errors.
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshRecentRuns();
+  setInterval(refreshRecentRuns, 3000);
+});
+</script>
 </body>
 </html>
