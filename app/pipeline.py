@@ -1,7 +1,23 @@
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+# GitLab CI top-level keywords that are NOT job definitions
+_GITLAB_CI_RESERVED_KEYS = {
+    "stages",
+    "variables",
+    "image",
+    "services",
+    "before_script",
+    "after_script",
+    "include",
+    "workflow",
+    "cache",
+    "default",
+    "pages",
+}
 
 
 @dataclass
@@ -27,6 +43,9 @@ class Pipeline:
 
     @staticmethod
     def from_file(path: str) -> "Pipeline":
+        lower = path.lower()
+        if lower.endswith(".yml") or lower.endswith(".yaml"):
+            return Pipeline.from_gitlab_yaml_file(path)
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return Pipeline.from_dict(data, source_file=path)
@@ -55,14 +74,177 @@ class Pipeline:
             source_file=source_file,
         )
 
+    @staticmethod
+    def from_gitlab_yaml_file(path: str) -> "Pipeline":
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "pyyaml is required to load .gitlab-ci.yml files. "
+                "Run: pip install pyyaml"
+            )
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return Pipeline._from_gitlab_ci_dict(data, source_file=path, path=path)
+
+    @staticmethod
+    def _from_gitlab_ci_dict(
+        data: dict,
+        source_file: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> "Pipeline":
+        """Convert a parsed .gitlab-ci.yml dict to a Pipeline."""
+        # Derive a pipeline name from the file path or a fallback
+        if path:
+            basename = os.path.basename(path)
+            # For .gitlab-ci.yml  → "gitlab-ci"
+            # For myapp.gitlab-ci.yml → "myapp.gitlab-ci"
+            # For ci.yml / ci.yaml → "ci"
+            name = re.sub(r"\.(yml|yaml)$", "", basename, flags=re.IGNORECASE)
+            # Leading dot on hidden files (e.g. ".gitlab-ci") → drop the dot
+            if name.startswith("."):
+                name = name[1:]
+            if not name:
+                name = "gitlab-ci"
+        else:
+            name = "gitlab-ci"
+
+        # Global variables
+        global_vars: dict[str, str] = {}
+        raw_vars = data.get("variables", {})
+        if isinstance(raw_vars, dict):
+            for k, v in raw_vars.items():
+                if isinstance(v, dict):
+                    # GitLab supports {value: ..., description: ...} form
+                    global_vars[str(k)] = str(v.get("value", ""))
+                else:
+                    global_vars[str(k)] = str(v) if v is not None else ""
+
+        # Global before_script / after_script
+        global_before = _normalise_script(data.get("before_script"))
+        global_after = _normalise_script(data.get("after_script"))
+
+        # Default overrides (GitLab 13.4+)
+        default_section = data.get("default", {}) or {}
+        if isinstance(default_section, dict):
+            if "before_script" in default_section:
+                global_before = _normalise_script(default_section["before_script"])
+            if "after_script" in default_section:
+                global_after = _normalise_script(default_section["after_script"])
+
+        # Stage ordering
+        stages: list[str] = data.get("stages") or []
+
+        # Collect job definitions (everything that is not a reserved key and is a dict)
+        jobs: dict[str, dict] = {}
+        for key, value in data.items():
+            if key in _GITLAB_CI_RESERVED_KEYS:
+                continue
+            if not isinstance(value, dict):
+                continue
+            # Jobs that start with a dot are hidden/template jobs – skip them
+            if key.startswith("."):
+                continue
+            jobs[key] = value
+
+        # Sort jobs by stage order; jobs with no stage come first (implicit "test" stage)
+        def _stage_order(job_name: str) -> tuple:
+            stage = jobs[job_name].get("stage", "test")
+            try:
+                idx = stages.index(stage)
+            except ValueError:
+                idx = len(stages)
+            return (idx, job_name)
+
+        sorted_job_names = sorted(jobs.keys(), key=_stage_order)
+
+        steps: list[Step] = []
+        for job_name in sorted_job_names:
+            job = jobs[job_name]
+
+            # Skip jobs explicitly set to never run
+            when = job.get("when", "on_success")
+            if when == "never":
+                continue
+
+            # Build the effective script
+            job_before = _normalise_script(job.get("before_script"))
+            job_after = _normalise_script(job.get("after_script"))
+
+            effective_before = job_before if "before_script" in job else global_before
+            effective_after = job_after if "after_script" in job else global_after
+
+            main_script = _normalise_script(job.get("script"))
+
+            all_commands = effective_before + main_script + effective_after
+            if not all_commands:
+                all_commands = ["echo 'no script defined'"]
+
+            command = _join_commands(all_commands)
+
+            # Job-level variables
+            job_vars: dict[str, str] = {}
+            raw_job_vars = job.get("variables", {})
+            if isinstance(raw_job_vars, dict):
+                for k, v in raw_job_vars.items():
+                    if isinstance(v, dict):
+                        job_vars[str(k)] = str(v.get("value", ""))
+                    else:
+                        job_vars[str(k)] = str(v) if v is not None else ""
+
+            allow_to_fail = bool(job.get("allow_failure", False))
+
+            steps.append(
+                Step(
+                    name=job_name,
+                    command=command,
+                    env=job_vars,
+                    allow_to_fail=allow_to_fail,
+                )
+            )
+
+        return Pipeline(
+            name=name,
+            steps=steps,
+            env=global_vars,
+            source_file=source_file,
+        )
+
+
+def _normalise_script(value) -> list[str]:
+    """Return a flat list of shell command strings from a YAML script value."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            if isinstance(item, list):
+                result.extend(str(x) for x in item)
+            else:
+                result.append(str(item))
+        return result
+    return [str(value)]
+
+
+def _join_commands(commands: list[str]) -> str:
+    """Join multiple shell commands into a single command string."""
+    if not commands:
+        return "true"
+    if len(commands) == 1:
+        return commands[0]
+    return " && ".join(commands)
+
 
 def load_pipelines(pipelines_dir: str) -> dict[str, Pipeline]:
-    """Load all JSON pipeline configs from a directory."""
+    """Load all pipeline configs (JSON and GitLab CI YAML) from a directory."""
     pipelines = {}
     if not os.path.isdir(pipelines_dir):
         return pipelines
     for fname in os.listdir(pipelines_dir):
-        if fname.endswith(".json"):
+        lower = fname.lower()
+        if lower.endswith(".json") or lower.endswith(".yml") or lower.endswith(".yaml"):
             path = os.path.join(pipelines_dir, fname)
             try:
                 p = Pipeline.from_file(path)
