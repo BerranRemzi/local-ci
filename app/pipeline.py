@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -235,10 +234,6 @@ def _join_commands(commands: list[str]) -> str:
         return "true"
     if len(commands) == 1:
         return commands[0]
-    # Use platform-appropriate separator
-    if sys.platform == "win32":
-        # On Windows, cmd.exe uses & to chain; use PowerShell syntax if already using PS
-        return " && ".join(commands)
     return " && ".join(commands)
 
 
