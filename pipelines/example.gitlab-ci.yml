@@ -1,0 +1,45 @@
+# Example .gitlab-ci.yml for local-ci
+# Drop this file (or any .yml/.yaml) into the pipelines/ directory and
+# local-ci will discover and run it just like a JSON pipeline.
+
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  APP_NAME: "my-app"
+  BUILD_DIR: "build"
+
+before_script:
+  - 'echo "=== Global before_script: setting up environment ==="'
+
+build-job:
+  stage: build
+  variables:
+    EXTRA: "build-extra"
+  script:
+    - echo "Building $APP_NAME ..."
+    - mkdir -p $BUILD_DIR
+    - echo "compiled" > $BUILD_DIR/output.txt
+    - echo "Build complete"
+
+unit-tests:
+  stage: test
+  script:
+    - echo "Running unit tests for $APP_NAME ..."
+    - echo "All tests passed"
+
+lint:
+  stage: test
+  allow_failure: true
+  script:
+    - echo "Running linter ..."
+    - echo "Lint finished"
+
+deploy-staging:
+  stage: deploy
+  when: on_success
+  script:
+    - echo "Deploying $APP_NAME to staging ..."
+    - echo "Deployment done"
